@@ -1,0 +1,24 @@
+{
+  "name": "realtime-location-tracker",
+  "version": "1.0.0",
+  "description": "Real Time Location tracker demo",
+  "keywords": [
+    "location-tracker"
+  ],
+  "license": "ISC",
+  "author": "B@C",
+  "type": "module",
+  "main": "server.js",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/AungThuyeinHein/realtime-location-tracker.git"
+  },
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "ejs": "^3.1.10",
+    "express": "^5.1.0",
+    "socket.io": "^4.8.1"
+  }
+}

@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>
+        <%= title %>
+    </title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ol@v8.2.0/ol.css">
+    <style>
+        #mapid {
+            height: 500px;
+        }
+
+        /* Adjust map height as needed */
+    </style>
+</head>
+
+<body>
+    <h1>
+        <%= title %>
+    </h1>
+    <div id="mapid"></div>
+
+    <script src="https://cdn.socket.io/4.0.0/socket.io.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/ol@v8.2.0/dist/ol.js"></script>
+
+    <script>
+        // Generate a unique user ID for this browser session
+        const userId = localStorage.getItem('userId') || `user_${Math.random().toString(36).substr(2, 9)}`;
+        localStorage.setItem('userId', userId);
+        console.log('My User ID:', userId);
+
+        const socket = io({
+            query: { userId: userId } // Send userId as a query parameter
+        });
+        console.log('Client-side Socket.IO connected');
+
+        // Initialize OpenLayers Map
+        const map = new ol.Map({
+            target: 'mapid',
+            layers: [
+                new ol.layer.Tile({
+                    source: new ol.source.OSM() // OpenStreetMap as the base layer
+                })
+            ],
+            view: new ol.View({
+                center: ol.proj.fromLonLat([0, 0]), // Initial center [longitude, latitude]
+                zoom: 2
+            })
+        });
+
+        const markers = {}; // Object to store OpenLayers features (markers), keyed by userId
+        let clientMarker = null; // To store the marker for the current client
+
+        socket.on('connect', () => {
+            console.log('Client connected to WebSocket');
+        });
+
+        socket.on('disconnect', () => {
+            console.log('Client disconnected from WebSocket');
+        });
+
+        socket.on('userOnline', (onlineUserId) => {
+            if (onlineUserId !== userId) {
+                console.log(`${onlineUserId} is online`);
+            }
+        });
+
+        socket.on('userOffline', (offlineUserId) => {
+            if (offlineUserId !== userId) {
+                console.log(`${offlineUserId} is offline`);
+                // Remove the marker for the disconnected user if it exists
+                if (markers[offlineUserId]) {
+                    map.removeLayer(markers[offlineUserId].layer); // Remove the layer containing the marker
+                    delete markers[offlineUserId];
+                }
+            }
+        });
+
+        socket.on('userLocationUpdated', (data) => {
+            const { userId, latitude, longitude } = data;
+            console.log('Received location update:', data);
+
+            const lonLat = [latitude,longitude]; // Standard [longitude, latitude]
+            const mapProjection = 'EPSG:3857'; // Web Mercator
+            const point = ol.proj.transform(lonLat, 'EPSG:4326', mapProjection); // Transform to map projection
+
+            // Update existing marker or create a new one
+            if (markers[userId]) {
+                markers[userId].feature.setGeometry(new ol.geom.Point(point));
+            } else if (userId !== localStorage.getItem('userId')) { // Don't create a general marker for the client
+                const iconFeature = new ol.Feature({
+                    geometry: new ol.geom.Point(point),
+                    name: `User: ${userId}`
+                });
+
+                const iconStyle = new ol.style.Style({
+                    image: new ol.style.Circle({
+                        radius: 5,
+                        fill: new ol.style.Fill({ color: 'blue' }),
+                        stroke: new ol.style.Stroke({ color: 'black', width: 1 })
+                    })
+                });
+
+                iconFeature.setStyle(iconStyle);
+
+                const vectorLayer = new ol.layer.Vector({
+                    source: new ol.source.Vector({
+                        features: [iconFeature]
+                    })
+                });
+
+                map.addLayer(vectorLayer);
+                markers[userId] = { feature: iconFeature, layer: vectorLayer };
+            }
+
+            // Optionally pan the map to the latest location of the current user
+            if (userId === localStorage.getItem('userId')) {
+                const view = map.getView();
+                view.animate({ center: point, duration: 200 });
+                // Update the client's own marker if it exists
+                if (clientMarker) {
+                    clientMarker.setGeometry(new ol.geom.Point(point));
+                }
+            }
+        });
+
+        function sendLocationUpdate(latitude, longitude, timestamp) {
+            socket.emit('locationUpdate', { latitude, longitude, timestamp });
+        }
+
+        function getCurrentLocation() {
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(
+                    (position) => {
+                        const { latitude, longitude } = position.coords;
+                        const timestamp = Date.now();
+                        sendLocationUpdate(latitude, longitude, timestamp);
+                        // Add or update the client's own marker
+                        const lonLat = [longitude, latitude];
+                        const mapProjection = 'EPSG:3857';
+                        const point = ol.proj.transform(lonLat, 'EPSG:4326', mapProjection);
+                        if (!clientMarker) {
+                            clientMarker = new ol.Feature({
+                                geometry: new ol.geom.Point(point),
+                                name: 'You'
+                            });
+                            const iconStyle = new ol.style.Style({
+                                image: new ol.style.Circle({
+                                    radius: 7,
+                                    fill: new ol.style.Fill({ color: 'green' }),
+                                    stroke: new ol.style.Stroke({ color: 'black', width: 1 })
+                                })
+                            });
+                            clientMarker.setStyle(iconStyle);
+                            const vectorLayer = new ol.layer.Vector({
+                                source: new ol.source.Vector({
+                                    features: [clientMarker]
+                                })
+                            });
+                            map.addLayer(vectorLayer);
+                        } else {
+                            clientMarker.setGeometry(new ol.geom.Point(point));
+                        }
+                    },
+                    (error) => {
+                        console.error('Error getting location:', error.message);
+                        // Optionally handle errors (e.g., default location, retry)
+                    }
+                );
+            } else {
+                console.error('Geolocation is not supported by this browser.');
+            }
+        }
+
+        // Simulate sending location updates and get initial client location
+        getCurrentLocation();
+        setInterval(getCurrentLocation, 5000);
+    </script>
+</body>
+
+</html>
